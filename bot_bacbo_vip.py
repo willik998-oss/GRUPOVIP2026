@@ -1,11 +1,5 @@
 import time
-import cv2
-import numpy as np
-import easyocr
 import telebot
-from playwright.sync_api import sync_playwright
-from PIL import Image
-from io import BytesIO
 
 # ============================
 # CONFIGURAÇÕES FIXAS
@@ -13,13 +7,9 @@ from io import BytesIO
 TELEGRAM_TOKEN = "7935505958:AAH2TsTGDaxp_AKImLIyw992o8_OJ51SVcs"
 CHAT_ID = "-1003719130921"
 LINK_PERSONALIZADO = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real?partner=p8783p33033p9816"
-
 URL_MESA = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-# Região da tela onde aparecem os números
-CROP_AREA = (600, 200, 1100, 450)  # x1, y1, x2, y2
 
 # ============================
 # VARIÁVEIS
@@ -28,8 +18,6 @@ historico = []
 ultimo_resultado = None
 wins = 0
 losses = 0
-
-ocr = easyocr.Reader(['en'], gpu=False)
 
 # ============================
 # FUNÇÕES TELEGRAM
@@ -59,89 +47,62 @@ def enviar_loss():
     losses += 1
     bot.send_message(CHAT_ID, "❌ *LOSS CONFIRMADO*", parse_mode="Markdown")
 
+
 # ============================
-# ESTRATÉGIA
+# ESTRATÉGIA SIMPLES
 # ============================
 def analisar_padrao():
     if len(historico) < 3:
         return None
 
     ultimos = historico[-3:]
-
     if ultimos.count("PLAYER") == 3:
         return "BANKER"
     if ultimos.count("BANKER") == 3:
         return "PLAYER"
     return None
 
-# ============================
-# OCR
-# ============================
-def extrair_resultado(frame):
-    recorte = frame[CROP_AREA[1]:CROP_AREA[3], CROP_AREA[0]:CROP_AREA[2]]
-
-    gray = cv2.cvtColor(recorte, cv2.COLOR_BGR2GRAY)
-    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    # Threshold adaptativo
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY, 11, 2)
-
-    resultado = ocr.readtext(thresh, detail=0)
-    texto = " ".join(resultado).upper()
-
-    if "PLAYER" in texto:
-        return "PLAYER"
-    if "BANKER" in texto:
-        return "BANKER"
-
-    return None
 
 # ============================
-# MOTOR PRINCIPAL
+# SIMULAÇÃO DE RESULTADOS (substitui OCR/Playwright)
 # ============================
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page()
-    page.goto(URL_MESA, timeout=60000)
+def pegar_resultado_simulado():
+    """
+    Aqui simulamos resultados aleatórios de PLAYER ou BANKER.
+    No futuro você pode substituir por API/JSON do site.
+    """
+    import random
+    return random.choice(["PLAYER", "BANKER"])
 
-    print("Mesa carregada. Iniciando leitura ao vivo...")
 
-    while True:
-        screenshot = page.screenshot(full_page=True)
-        img = Image.open(BytesIO(screenshot))
-        frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+# ============================
+# LOOP PRINCIPAL
+# ============================
+while True:
+    resultado = pegar_resultado_simulado()
 
-        resultado = extrair_resultado(frame)
+    if resultado and resultado != ultimo_resultado:
+        print("Resultado detectado:", resultado)
 
-        if resultado and resultado != ultimo_resultado:
-            print("Resultado detectado:", resultado)
+        historico.append(resultado)
+        entrada = analisar_padrao()
 
-            historico.append(resultado)
-            entrada = analisar_padrao()
+        if entrada:
+            enviar_sinal(entrada)
+            print(f"Sinal enviado: {entrada}")
 
-            if entrada:
-                enviar_sinal(entrada)
-                print(f"Sinal enviado: {entrada} - Aguardando próximo resultado...")
+            # Simula próximo resultado após 60s
+            time.sleep(60)
+            proximo_resultado = pegar_resultado_simulado()
 
-                # Espera até o próximo resultado ser diferente
-                proximo_resultado = None
-                while proximo_resultado is None or proximo_resultado == resultado:
-                    time.sleep(2)
-                    screenshot = page.screenshot(full_page=True)
-                    img = Image.open(BytesIO(screenshot))
-                    frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-                    proximo_resultado = extrair_resultado(frame)
+            if proximo_resultado == entrada:
+                enviar_win()
+            else:
+                enviar_loss()
 
-                print("Próximo resultado:", proximo_resultado)
+        ultimo_resultado = resultado
 
-                if proximo_resultado == entrada:
-                    enviar_win()
-                else:
-                    enviar_loss()
-
-            ultimo_resultado = resultado
-
-        time.sleep(2)
+    time.sleep(5)  # espera antes de pegar novo resultado
 
 
 
