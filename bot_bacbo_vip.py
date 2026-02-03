@@ -6,29 +6,29 @@ import telebot
 from playwright.sync_api import sync_playwright
 from PIL import Image
 from io import BytesIO
+import os
+from dotenv import load_dotenv
 
 # ============================
-# CONFIGURAÇÕES
+# CARREGAR VARIÁVEIS DE AMBIENTE
 # ============================
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("7935505958:AAH2TsTGDaxp_AKImLIyw992o8_OJ51SVcs")
+CHAT_ID = os.getenv("-1003719130921)
+LINK_PERSONALIZADO = os.getenv("https://btt-pt.hopghpfa.com/pt/game/bac-bo/real?partner=p8783p33033p9816")
 
 URL_MESA = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real"
-
-TELEGRAM_TOKEN = "7935505958:AAH2TsTGDaxp_AKImLIyw992o8_OJ51SVcs"
-CHAT_ID = "-1003719130921"
-
-# Link customizado que será adicionado à mensagem do Telegram
-LINK_PERSONALIZADO = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real?partner=p8783p33033p9816"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # Região da tela onde aparecem os números
-# (ajuste depois de testar)
+# Ajuste conforme sua tela
 CROP_AREA = (600, 200, 1100, 450)  # x1, y1, x2, y2
 
 # ============================
 # VARIÁVEIS
 # ============================
-
 historico = []
 ultimo_resultado = None
 wins = 0
@@ -39,7 +39,6 @@ ocr = easyocr.Reader(['en'], gpu=False)
 # ============================
 # FUNÇÕES TELEGRAM
 # ============================
-
 def enviar_sinal(entrada, gale=0):
     msg = f"""
 🎯 *SINAL BAC BO AO VIVO*
@@ -68,7 +67,6 @@ def enviar_loss():
 # ============================
 # ESTRATÉGIA
 # ============================
-
 def analisar_padrao():
     if len(historico) < 3:
         return None
@@ -84,13 +82,12 @@ def analisar_padrao():
 # ============================
 # OCR
 # ============================
-
 def extrair_resultado(frame):
     recorte = frame[CROP_AREA[1]:CROP_AREA[3], CROP_AREA[0]:CROP_AREA[2]]
 
     gray = cv2.cvtColor(recorte, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    # Use adaptiveThreshold para melhor detecção
+    # Melhor detecção
     thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY, 11, 2)
 
@@ -108,7 +105,6 @@ def extrair_resultado(frame):
 # ============================
 # MOTOR PRINCIPAL
 # ============================
-
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False)
     page = browser.new_page()
@@ -132,9 +128,9 @@ with sync_playwright() as p:
 
             if entrada:
                 enviar_sinal(entrada)
-                print(f"Sinal enviado: {entrada} - Aguardando próximo resultado para WIN/LOSS...")
+                print(f"Sinal enviado: {entrada} - Aguardando próximo resultado...")
 
-                # Espera até o próximo resultado ser diferente do atual
+                # Espera o próximo resultado ser diferente
                 proximo_resultado = None
                 while proximo_resultado is None or proximo_resultado == resultado:
                     time.sleep(2)
@@ -149,6 +145,11 @@ with sync_playwright() as p:
                     enviar_win()
                 else:
                     enviar_loss()
+
+            ultimo_resultado = resultado
+
+        time.sleep(2)
+
 
             ultimo_resultado = resultado
 
