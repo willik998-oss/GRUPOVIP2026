@@ -20,9 +20,10 @@ bot = telebot.TeleBot(TOKEN)
 historico = []
 wins = 0
 losses = 0
+rodada_ativa = False  # controla se já enviou sinal nessa rodada
 
 # ============================
-# FUNÇÕES ESTRATÉGIA
+# FUNÇÕES
 # ============================
 
 def gerar_resultado_simulado():
@@ -31,18 +32,12 @@ def gerar_resultado_simulado():
 def analisar_padrao():
     if len(historico) < 3:
         return None
-
     ultimos = historico[-3:]
-
     if ultimos.count("PLAYER") == 3:
         return "BANKER"
     elif ultimos.count("BANKER") == 3:
         return "PLAYER"
     return None
-
-# ============================
-# ENVIO DE SINAIS
-# ============================
 
 def enviar_sinal(entrada, gale=0):
     mensagem = f"""
@@ -71,17 +66,9 @@ def enviar_loss():
     losses += 1
     bot.send_message(CHAT_ID, "❌ *LOSS CONFIRMADO!* 🔴", parse_mode="Markdown")
 
-# ============================
-# RELATÓRIO DIÁRIO
-# ============================
-
 def enviar_relatorio():
     total = wins + losses
-    if total == 0:
-        assertividade = 0
-    else:
-        assertividade = round((wins / total) * 100, 2)
-
+    assertividade = round((wins / total) * 100, 2) if total else 0
     mensagem = f"""
 📊 *RELATÓRIO DO DIA*
 
@@ -101,39 +88,43 @@ while True:
     resultado = gerar_resultado_simulado()
     historico.append(resultado)
 
-    entrada = analisar_padrao()
-
-    if entrada:
-        enviar_sinal(entrada)
-
-        time.sleep(60)
-
-        resultado_final = gerar_resultado_simulado()
-
-        if resultado_final == entrada:
-            enviar_win()
-        else:
-            enviar_sinal(entrada, gale=1)
+    if not rodada_ativa:
+        entrada = analisar_padrao()
+        if entrada:
+            rodada_ativa = True
+            # 1ª tentativa
+            enviar_sinal(entrada)
             time.sleep(60)
-
             resultado_final = gerar_resultado_simulado()
 
             if resultado_final == entrada:
                 enviar_win()
             else:
-                enviar_sinal(entrada, gale=2)
+                # Gale 1
+                enviar_sinal(entrada, gale=1)
                 time.sleep(60)
-
                 resultado_final = gerar_resultado_simulado()
 
                 if resultado_final == entrada:
                     enviar_win()
                 else:
-                    enviar_loss()
+                    # Gale 2
+                    enviar_sinal(entrada, gale=2)
+                    time.sleep(60)
+                    resultado_final = gerar_resultado_simulado()
 
+                    if resultado_final == entrada:
+                        enviar_win()
+                    else:
+                        enviar_loss()
+
+            rodada_ativa = False  # libera para próxima rodada
+
+    # Relatório diário às 23:59
     if datetime.now().strftime("%H:%M") == "23:59":
         enviar_relatorio()
         wins = 0
         losses = 0
 
     time.sleep(15)
+
