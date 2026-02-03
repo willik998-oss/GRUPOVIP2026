@@ -1,130 +1,157 @@
-import telebot
 import time
-import random
-from datetime import datetime
+import cv2
+import numpy as np
+import easyocr
+import telebot
+from playwright.sync_api import sync_playwright
+from PIL import Image
+from io import BytesIO
 
 # ============================
 # CONFIGURAÇÕES
 # ============================
 
-TOKEN = "7935505958:AAH2TsTGDaxp_AKImLIyw992o8_OJ51SVcs"
-CHAT_ID = "-1003719130921"
-LINK_PLATAFORMA = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real?partner=p8783p33033p9816"
+URL_MESA = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real"
 
-bot = telebot.TeleBot(TOKEN)
+TELEGRAM_TOKEN = "7935505958:AAH2TsTGDaxp_AKImLIyw992o8_OJ51SVcs"
+CHAT_ID = "-1003719130921"
+
+# Link customizado que será adicionado à mensagem do Telegram
+LINK_PERSONALIZADO = "https://btt-pt.hopghpfa.com/pt/game/bac-bo/real?partner=p8783p33033p9816"
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# Região da tela onde aparecem os números
+# (ajuste depois de testar)
+CROP_AREA = (600, 200, 1100, 450)  # x1, y1, x2, y2
 
 # ============================
-# VARIÁVEIS GLOBAIS
+# VARIÁVEIS
 # ============================
 
 historico = []
+ultimo_resultado = None
 wins = 0
 losses = 0
-rodada_ativa = False  # controla se já enviou sinal nessa rodada
+
+ocr = easyocr.Reader(['en'], gpu=False)
 
 # ============================
-# FUNÇÕES
+# FUNÇÕES TELEGRAM
 # ============================
-
-def gerar_resultado_simulado():
-    return random.choice(["PLAYER", "BANKER"])
-
-def analisar_padrao():
-    if len(historico) < 3:
-        return None
-    ultimos = historico[-3:]
-    if ultimos.count("PLAYER") == 3:
-        return "BANKER"
-    elif ultimos.count("BANKER") == 3:
-        return "PLAYER"
-    return None
 
 def enviar_sinal(entrada, gale=0):
-    mensagem = f"""
-🎯 *SINAL CONFIRMADO – BAC BO VIP*
+    msg = f"""
+🎯 *SINAL BAC BO AO VIVO*
 
 📌 Entrada: {entrada}
-🛡 Proteção: EMPATE 🟡
 ♻ Gale: {gale}/2
+🛡 Proteção: EMPATE
 
-🎰 Plataforma:
-{LINK_PLATAFORMA}
-
-💰 Gestão: 1 a 3% da banca
-
-Boa sorte! 🍀
+🔗 [Clique aqui]({LINK_PERSONALIZADO})
+🎰 {URL_MESA}
 """
-    bot.send_message(CHAT_ID, mensagem, parse_mode="Markdown")
+    bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+
 
 def enviar_win():
     global wins
     wins += 1
-    bot.send_message(CHAT_ID, "✅ *WIN CONFIRMADO!* 🟢", parse_mode="Markdown")
+    bot.send_message(CHAT_ID, "✅ *WIN CONFIRMADO*", parse_mode="Markdown")
+
 
 def enviar_loss():
     global losses
     losses += 1
-    bot.send_message(CHAT_ID, "❌ *LOSS CONFIRMADO!* 🔴", parse_mode="Markdown")
-
-def enviar_relatorio():
-    total = wins + losses
-    assertividade = round((wins / total) * 100, 2) if total else 0
-    mensagem = f"""
-📊 *RELATÓRIO DO DIA*
-
-✅ Wins: {wins}
-❌ Losses: {losses}
-🎯 Assertividade: {assertividade}%
-
-Parabéns a todos! 🚀
-"""
-    bot.send_message(CHAT_ID, mensagem, parse_mode="Markdown")
+    bot.send_message(CHAT_ID, "❌ *LOSS CONFIRMADO*", parse_mode="Markdown")
 
 # ============================
-# LOOP PRINCIPAL
+# ESTRATÉGIA
 # ============================
 
-while True:
-    resultado = gerar_resultado_simulado()
-    historico.append(resultado)
+def analisar_padrao():
+    if len(historico) < 3:
+        return None
 
-    if not rodada_ativa:
-        entrada = analisar_padrao()
-        if entrada:
-            rodada_ativa = True
-            # 1ª tentativa
-            enviar_sinal(entrada)
-            time.sleep(60)
-            resultado_final = gerar_resultado_simulado()
+    ultimos = historico[-3:]
 
-            if resultado_final == entrada:
-                enviar_win()
-            else:
-                # Gale 1
-                enviar_sinal(entrada, gale=1)
-                time.sleep(60)
-                resultado_final = gerar_resultado_simulado()
+    if ultimos.count("PLAYER") == 3:
+        return "BANKER"
+    if ultimos.count("BANKER") == 3:
+        return "PLAYER"
+    return None
 
-                if resultado_final == entrada:
+# ============================
+# OCR
+# ============================
+
+def extrair_resultado(frame):
+    recorte = frame[CROP_AREA[1]:CROP_AREA[3], CROP_AREA[0]:CROP_AREA[2]]
+
+    gray = cv2.cvtColor(recorte, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    # Use adaptiveThreshold para melhor detecção
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 11, 2)
+
+    resultado = ocr.readtext(thresh, detail=0)
+
+    texto = " ".join(resultado).upper()
+
+    if "PLAYER" in texto:
+        return "PLAYER"
+    if "BANKER" in texto:
+        return "BANKER"
+
+    return None
+
+# ============================
+# MOTOR PRINCIPAL
+# ============================
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=False)
+    page = browser.new_page()
+    page.goto(URL_MESA, timeout=60000)
+
+    print("Mesa carregada. Iniciando leitura ao vivo...")
+
+    while True:
+        screenshot = page.screenshot(full_page=True)
+        img = Image.open(BytesIO(screenshot))
+        frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+        resultado = extrair_resultado(frame)
+
+        if resultado and resultado != ultimo_resultado:
+            print("Resultado detectado:", resultado)
+
+            historico.append(resultado)
+
+            entrada = analisar_padrao()
+
+            if entrada:
+                enviar_sinal(entrada)
+                print(f"Sinal enviado: {entrada} - Aguardando próximo resultado para WIN/LOSS...")
+
+                # Espera até o próximo resultado ser diferente do atual
+                proximo_resultado = None
+                while proximo_resultado is None or proximo_resultado == resultado:
+                    time.sleep(2)
+                    screenshot = page.screenshot(full_page=True)
+                    img = Image.open(BytesIO(screenshot))
+                    frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                    proximo_resultado = extrair_resultado(frame)
+
+                print("Próximo resultado:", proximo_resultado)
+
+                if proximo_resultado == entrada:
                     enviar_win()
                 else:
-                    # Gale 2
-                    enviar_sinal(entrada, gale=2)
-                    time.sleep(60)
-                    resultado_final = gerar_resultado_simulado()
+                    enviar_loss()
 
-                    if resultado_final == entrada:
-                        enviar_win()
-                    else:
-                        enviar_loss()
+            ultimo_resultado = resultado
 
-            rodada_ativa = False  # libera para próxima rodada
+        time.sleep(2)
 
-    # Relatório diário às 23:59
-    if datetime.now().strftime("%H:%M") == "23:59":
-        enviar_relatorio()
-        wins = 0
-        losses = 0
-
-    time.sleep(15)
 
